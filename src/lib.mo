@@ -21,11 +21,52 @@
 import Blob "mo:base/Blob";
 import Array "mo:base/Array";
 import Nat32 "mo:base/Nat32";
-import Prim "mo:⛔";
+import Order "mo:base/Order";
+import Debug "mo:base/Debug";
 
 module {
+  type Order = Order.Order;
+
   /// Red-black tree of key `Nat`.
   public type Tree = ?({ #R; #B }, Tree, Nat, Tree);
+
+  public type StableEnumeration<K> = {
+    var array : [var ?K];
+    var size_ : Nat;
+    var tree : Tree;
+  };
+
+  /// Create a stable version of the Enumeration data structure.
+  /// Allows the use of the `stable` keyword to create a stable variable.
+  ///
+  /// Should be used in conjunction with `Enumeration.wrap_stable()`.
+  ///
+  /// Example:
+  /// ```motoko
+  ///   stable let stable_accounts = Enumeration.new_stable<Text>();
+  ///   let accounts = Enumeration.wrap_stable(stable_accounts, Text.compare);
+  ///
+  ///   assert accounts.add("Alice") == 0;
+  ///   assert accounts.get(0) == "Alice";
+  ///```
+  public func new_stable<K>() : StableEnumeration<K> {
+    return {
+      var array : [var ?K] = [var null];
+      var size_ = 0;
+      var tree = (null : Tree);
+    };
+  };
+
+  /// Create a new bidirectional enumeration class.
+  public func new_heap<K>(cmp : (K, K) -> Order) : Enumeration<K> {
+    return Enumeration<K>(new_stable<K>(), cmp);
+  };
+
+  /// Wrap a stable enumeration in a class.
+  /// The benefit is that the `compare` function is stored and does not need to be passed to every method.
+  public func wrap_stable<K>(self : StableEnumeration<K>, cmp : (K, K) -> Order) : Enumeration<K> {
+    return Enumeration<K>(self, cmp);
+  };
 
   /// Bidirectional enumeration of any `K` s in the order they are added.
   /// For a map from `K` to index `Nat` it is implemented as red-black tree,
@@ -35,14 +76,10 @@ module {
   /// ```motoko
   /// let e = Enumeration.Enumeration<Blob>(Blob.compare, "");
   /// ```
-  public class Enumeration<K>(compare : (K, K) -> {#equal; #greater; #less}, empty : K) {
-    private var array : [var K] = [var empty];
-    private var size_ = 0;
-
-    private var tree = (null : Tree);
+  public class Enumeration<K>(self : StableEnumeration<K>, compare : (K, K) -> Order) {
 
     /// Add `key` to enumeration. Returns `size` if the key in new to the enumeration and index of key in enumeration otherwise.
-    /// 
+    ///
     /// Example:
     /// ```motoko
     /// let e = Enumeration.Enumeration<Blob>(Blob.compare, "");
@@ -52,7 +89,7 @@ module {
     /// ```
     /// Runtime: O(log(n))
     public func add(key : K) : Nat {
-      var index = size_;
+      var index = self.size_;
 
       func lbalance(left : Tree, y : Nat, right : Tree) : Tree {
         switch (left, right) {
@@ -64,8 +101,8 @@ module {
 
       func rbalance(left : Tree, y : Nat, right : Tree) : Tree {
         switch (left, right) {
-          case (l, ?(#R, l1, y1, ?(#R, l2, y2, r2)))  ?(#R, ?(#B, l, y, l1), y1, ?(#B, l2, y2, r2));
-          case (l, ?(#R, ?(#R, l1, y1, r1), y2, r2))  ?(#R, ?(#B, l, y, l1), y1, ?(#B, r1, y2, r2));
+          case (l, ?(#R, l1, y1, ?(#R, l2, y2, r2))) ?(#R, ?(#B, l, y, l1), y1, ?(#B, l2, y2, r2));
+          case (l, ?(#R, ?(#R, l1, y1, r1), y2, r2)) ?(#R, ?(#B, l, y, l1), y1, ?(#B, r1, y2, r2));
           case _ ?(#B, left, y, right);
         };
       };
@@ -73,33 +110,33 @@ module {
       func insert(tree : Tree) : Tree {
         switch tree {
           case (?(#B, left, y, right)) {
-                 switch (compare(key, array[y])) {
-                   case (#less) lbalance(insert(left), y, right);
-                   case (#greater) rbalance(left, y, insert(right));
-                   case (#equal) {
-                          index := y;
-                          tree;
-                        };
-                 };
-               };
+            switch (compare(key, get(y))) {
+              case (#less) lbalance(insert(left), y, right);
+              case (#greater) rbalance(left, y, insert(right));
+              case (#equal) {
+                index := y;
+                tree;
+              };
+            };
+          };
           case (?(#R, left, y, right)) {
-                 switch (compare(key, array[y])) {
-                   case (#less) ?(#R, insert(left), y, right);
-                   case (#greater) ?(#R, left, y, insert(right));
-                   case (#equal) {
-                          index := y;
-                          tree;
-                        };
-                 };
-               };
+            switch (compare(key, get(y))) {
+              case (#less) ?(#R, insert(left), y, right);
+              case (#greater) ?(#R, left, y, insert(right));
+              case (#equal) {
+                index := y;
+                tree;
+              };
+            };
+          };
           case (null) {
-                 index := size_;
-                 ?(#R, null, size_, null);
-               };
+            index := self.size_;
+            ?(#R, null, self.size_, null);
+          };
         };
       };
 
-      tree := switch (insert(tree)) {
+      self.tree := switch (insert(self.tree)) {
         case (?(#R, left, y, right)) ?(#B, left, y, right);
         case other other;
       };
@@ -115,19 +152,19 @@ module {
         Nat32.toNat(m);
       };
 
-      if (index == size_) {
-        if (size_ == array.size()) {
-          array := Array.tabulateVar<K>(next_size(size_), func(i) = if (i < size_) { array[i] } else { empty });
+      if (index == self.size_) {
+        if (self.size_ == self.array.size()) {
+          self.array := Array.tabulateVar<?K>(next_size(self.size_), func(i) = if (i < self.size_) { self.array[i] } else { null });
         };
-        array[size_] := key;
-        size_ += 1;
+        self.array[self.size_] := ?key;
+        self.size_ += 1;
       };
 
       index;
     };
 
     /// Returns `?index` where `index` is the index of `key` in order it was added to enumeration, or `null` it `key` wasn't added.
-    /// 
+    ///
     /// Example:
     /// ```motoko
     /// let e = Enumeration.Enumeration<Blob>(Blob.compare, "");
@@ -142,21 +179,21 @@ module {
       func get_in_tree(x : K, t : Tree) : ?Nat {
         switch t {
           case (?(_, l, y, r)) {
-                 switch (compare(x, array[y])) {
-                   case (#less) get_in_tree(x, l);
-                   case (#equal) ?y;
-                   case (#greater) get_in_tree(x, r);
-                 };
-               };
+            switch (compare(x, get(y))) {
+              case (#less) get_in_tree(x, l);
+              case (#equal) ?y;
+              case (#greater) get_in_tree(x, r);
+            };
+          };
           case (null) null;
         };
       };
 
-      get_in_tree(key, tree);
+      get_in_tree(key, self.tree);
     };
 
     /// Returns `K` with index `index`. Traps it index is out of bounds.
-    /// 
+    ///
     /// Example:
     /// ```motoko
     /// let e = Enumeration.Enumeration<Blob>(Blob.compare, "");
@@ -167,13 +204,14 @@ module {
     /// ```
     /// Runtime: O(1)
     public func get(index : Nat) : K {
-      if (index < size_) { array[index] } else {
-        Prim.trap("Index out of bounds");
+      switch (self.array[index]) {
+        case (null) Debug.trap("Enumeration: index out of bounds");
+        case (?key) key;
       };
     };
 
     /// Returns number of unique keys added to enumeration.
-    /// 
+    ///
     /// Example:
     /// ```motoko
     /// let e = Enumeration.Enumeration<Blob>(Blob.compare, "");
@@ -182,11 +220,11 @@ module {
     /// assert(e.size() == 2);
     /// ```
     /// Runtime: O(1)
-    public func size() : Nat = size_;
+    public func size() : Nat = self.size_;
 
-    /// Returns pair of red-black tree for map from `K` to `Nat` and
+    /// Returns pair of red-black self. for map from `K` to `Nat` and
     /// array of `K` for map from `Nat` to `K`.
-    /// 
+    ///
     /// Example:
     /// ```motoko
     /// let e = Enumeration.Enumeration<Blob>(Blob.compare, "");
@@ -195,13 +233,13 @@ module {
     /// e.unsafeUnshare(e.share()); // Nothing changed
     /// ```
     /// Runtime: O(1)
-    public func share() : (Tree, [var K], Nat) = (tree, array, size_);
+    public func share() : (Tree, [var ?K], Nat) = (self.tree, self.array, self.size_);
 
-    /// Sets internal content from red-black tree for map from `K` to `Nat`
+    /// Sets self content from red-black tree for map from `K` to `Nat`
     /// and array of `K` for map from `Nat` to `K`.
     /// `t` should be a valid red-black tree and correspond to array `a`.
     /// This function does not perform any validation.
-    /// 
+    ///
     /// Example:
     /// ```motoko
     /// let e = Enumeration.Enumeration<Blob>(Blob.compare, "");
@@ -210,10 +248,10 @@ module {
     /// e.unsafeUnshare(e.share()); // Nothing changed
     /// ```
     /// Runtime: O(1)
-    public func unsafeUnshare(data : (Tree, [var K], Nat)) {
-      tree := data.0;
-      array := data.1;
-      size_ := data.2;
+    public func unsafeUnshare(data : (Tree, [var ?K], Nat)) {
+      self.tree := data.0;
+      self.array := data.1;
+      self.size_ := data.2;
     };
   };
 };

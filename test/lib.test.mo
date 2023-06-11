@@ -41,9 +41,9 @@ class RNG() {
 
 let n = 100;
 let r = RNG();
-let b = Enumeration.Enumeration<Blob>(Blob.compare, "");
-let p = Enumeration.Enumeration(Principal.compare, Principal.fromBlob "");
-let t = Enumeration.Enumeration(Text.compare, "");
+let b = Enumeration.new_heap<Blob>(Blob.compare);
+let p = Enumeration.new_heap<Principal>(Principal.compare);
+let t = Enumeration.new_heap<Text>(Text.compare);
 let blobs = Array.tabulate<Blob>(n, func(i) = r.blob());
 let principals = Array.tabulate<Principal>(n, func(i) = r.principal());
 let texts = Array.tabulate<Text>(n, func(i) = r.text());
